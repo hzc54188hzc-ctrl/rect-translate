@@ -16,7 +16,13 @@ from PySide6.QtWidgets import QApplication
 
 from recttrans import capture
 from recttrans.frame import RegionFrame
-from recttrans.ocr import _auto_tags, _resolve_tag, recognize_png, score_text
+from recttrans.ocr import (
+    _auto_tags,
+    _resolve_tag,
+    available_languages,
+    recognize_png,
+    score_text,
+)
 
 _APP = None
 
@@ -45,15 +51,26 @@ def main() -> int:
         f"{score_text(en_text):.1f} vs {score_text(zh_garbage):.1f}",
     )
 
+    langs = available_languages()
     tags = _auto_tags()
+    has_zh = any(t.lower().startswith("zh") for t in langs)
+    has_en = any(t.lower().startswith("en") for t in langs)
     check(
-        "自动模式包含中英两套引擎",
-        any(t.lower().startswith("zh") for t in tags)
-        and any(t.lower().startswith("en") for t in tags),
-        str(tags),
+        "自动模式使用已安装的中英引擎",
+        bool(tags)
+        and all(t in langs for t in tags)
+        and (not has_zh or any(t.lower().startswith("zh") for t in tags))
+        and (not has_en or any(t.lower().startswith("en") for t in tags)),
+        f"installed={langs} auto={tags}",
     )
-    check("zh 解析到中文标签", (_resolve_tag("zh") or "").startswith("zh"))
-    check("en 解析到英文标签", (_resolve_tag("en") or "").startswith("en"))
+    if has_zh:
+        check("zh 解析到中文标签", (_resolve_tag("zh") or "").startswith("zh"))
+    else:
+        check("无中文引擎时 zh 回退 auto", _resolve_tag("zh") is None)
+    if has_en:
+        check("en 解析到英文标签", (_resolve_tag("en") or "").startswith("en"))
+    else:
+        check("无英文引擎时 en 回退 auto", _resolve_tag("en") is None)
     check("auto 返回 None（双引擎）", _resolve_tag("auto") is None)
 
     blank = capture.encode_png(300, 80, bytes([255, 255, 255, 255]) * 300 * 80)
