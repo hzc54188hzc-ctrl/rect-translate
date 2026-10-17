@@ -1,0 +1,56 @@
+name: build-exe
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt pyinstaller
+      - name: Build with PyInstaller
+        run: |
+          python -m PyInstaller --noconfirm --clean --windowed --onedir `
+            --name RectTranslate --icon app.ico --collect-all winrt 01-run.py
+      - name: Smoke test (startup)
+        shell: pwsh
+        run: |
+          $exe = "dist\RectTranslate\RectTranslate.exe"
+          $p = Start-Process -FilePath $exe -ArgumentList '--dump-state','--rect','100,100,300,100' -PassThru
+          if (-not $p.WaitForExit(30000)) { $p.Kill(); throw "app did not exit" }
+          if ($p.ExitCode -ne 0) { throw "app exited with $($p.ExitCode)" }
+      - name: Smoke test (OCR worker protocol)
+        shell: pwsh
+        run: |
+          $exe = "dist\RectTranslate\RectTranslate.exe"
+          $psi = New-Object System.Diagnostics.ProcessStartInfo
+          $psi.FileName = (Resolve-Path $exe)
+          $psi.Arguments = "--ocr-worker"
+          $psi.RedirectStandardInput = $true
+          $psi.RedirectStandardOutput = $true
+          $psi.UseShellExecute = $false
+          $p = [System.Diagnostics.Process]::Start($psi)
+          $p.StandardInput.WriteLine('{"cmd":"ping","id":1}')
+          $p.StandardInput.Flush()
+          $line = $p.StandardOutput.ReadLine()
+          if (-not $line -or $line -notmatch '"ok":\s*true') { throw "bad worker reply: $line" }
+          $p.StandardInput.WriteLine('{"cmd":"quit","id":2}')
+          $p.StandardInput.Flush()
+          if (-not $p.WaitForExit(15000)) { $p.Kill(); throw "worker did not exit" }
+      - name: Package
+        shell: pwsh
+        run: Compress-Archive -Path dist\RectTranslate\* -DestinationPath RectTranslate-win64.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: RectTranslate-win64
+          path: RectTranslate-win64.zip
