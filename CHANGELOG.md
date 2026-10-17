@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.0.4 — 2026-10-17
+
+- 提供 Windows x64 免安装版（PyInstaller，onedir），作为 Release 附件。
+- 打包模式下 OCR 子进程通过 `--ocr-worker` 回到同一 exe。
+
 ## v1.0.3 — 2026-10-17
 
 - 翻译历史：手动/划词翻译保留最近 50 条，托盘「历史记录…」可回看、复制、清空。

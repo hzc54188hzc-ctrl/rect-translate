@@ -45,6 +45,10 @@ python -m venv .venv
 
 首次运行会自动生成 `config.local.json`，默认使用**免费通道**，不需要 API key。
 
+## 免安装版（Windows x64）
+
+不想装 Python 的话，从 [Releases](https://github.com/hzc54188hzc-ctrl/rect-translate/releases) 下载 `RectTranslate-win64.zip`，解压后双击 `RectTranslate.exe`。首次运行同样会自动生成 `config.local.json`。
+
 需要桌面快捷方式时：
 
 ```powershell

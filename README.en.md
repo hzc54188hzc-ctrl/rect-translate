@@ -42,6 +42,10 @@ python -m venv .venv
 
 The first run creates `config.local.json` automatically and uses the **free provider**, so no API key is required.
 
+## Portable build (Windows x64)
+
+No Python required: download `RectTranslate-win64.zip` from [Releases](https://github.com/hzc54188hzc-ctrl/rect-translate/releases), unzip it, and run `RectTranslate.exe`. The first run also creates `config.local.json`.
+
 To install a desktop shortcut:
 
 ```powershell
