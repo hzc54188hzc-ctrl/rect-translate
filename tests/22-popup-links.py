@@ -51,9 +51,13 @@ def main() -> int:
         popup.show()
         _APP.processEvents()
         label = popup._translation
-        html = label.text()
-        check("译文渲染成链接", "href=" in html and "Transformer</a>" in html, html[:60])
-        check("链接可点击", label.textInteractionFlags() & Qt.TextInteractionFlag.LinksAccessibleByMouse != 0)
+        html = label.toHtml()
+        check(
+            "译文渲染成链接",
+            html.count("href=") >= 2 and "Transformer" in html,
+            f"links={html.count('href=')}",
+        )
+        check("链接交给程序打开", label.openExternalLinks() is False)
 
         popup._open_link("https://example.com/search?q=x")
         check("点击打开搜索", opened == ["https://example.com/search?q=x"], str(opened))

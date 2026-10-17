@@ -33,8 +33,12 @@ class OcrWorker:
 
     def _start(self) -> None:
         self._responses = queue.Queue()
+        if getattr(sys, "frozen", False):
+            command = [sys.executable, "--ocr-worker"]
+        else:
+            command = [sys.executable, "-u", str(WORKER_SCRIPT)]
         self._process = subprocess.Popen(
-            [sys.executable, "-u", str(WORKER_SCRIPT)],
+            command,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,

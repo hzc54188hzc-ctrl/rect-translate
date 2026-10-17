@@ -44,11 +44,14 @@ def main() -> int:
     popup.show()
     _APP.processEvents()
     label = popup._translation
-    needed = label.heightForWidth(label.width())
+    document = label.document()
+    document.setTextWidth(label.viewport().width())
+    needed = int(document.size().height())
+    visible = label.viewport().height()
     check(
         "按宽度换行且不裁切",
-        label.width() > 250 and label.height() + 2 >= needed,
-        f"标签 {label.width()}x{label.height()} 需要高 {needed}",
+        label.viewport().width() > 250 and visible + 2 >= needed,
+        f"视口 {label.viewport().width()}x{visible} 需要高 {needed}",
     )
 
     huge = "超长译文" * 1500

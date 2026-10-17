@@ -29,6 +29,8 @@ TESTS = [
     "30-ocr-auto.py",
     "31-translate-fallback.py",
     "32-window-rect.py",
+    "33-history.py",
+    "34-popup-scroll.py",
 ]
 
 

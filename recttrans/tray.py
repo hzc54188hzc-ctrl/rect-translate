@@ -29,6 +29,7 @@ def _make_icon() -> QIcon:
 class Tray(QSystemTrayIcon):
     toggle_requested = Signal()
     quick_requested = Signal()
+    history_requested = Signal()
     settings_requested = Signal()
     auto_toggled = Signal(bool)
     quit_requested = Signal()
@@ -43,6 +44,7 @@ class Tray(QSystemTrayIcon):
         self._auto = menu.addAction("自动翻译")
         self._auto.setCheckable(True)
         self._auto.setChecked(True)
+        self._history = menu.addAction("历史记录…")
         self._settings = menu.addAction("设置…")
         menu.addSeparator()
         self._quit = menu.addAction("退出")
@@ -52,6 +54,7 @@ class Tray(QSystemTrayIcon):
         self._toggle.triggered.connect(self.toggle_requested.emit)
         self._quick.triggered.connect(self.quick_requested.emit)
         self._auto.triggered.connect(lambda checked: self.auto_toggled.emit(checked))
+        self._history.triggered.connect(self.history_requested.emit)
         self._settings.triggered.connect(self.settings_requested.emit)
         self._quit.triggered.connect(self.quit_requested.emit)
         self.activated.connect(self._on_activated)

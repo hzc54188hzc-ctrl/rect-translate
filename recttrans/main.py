@@ -23,6 +23,8 @@ from recttrans.autotrans import AutoTranslator
 from recttrans.config import CONFIG_PATH, ensure_config, load_config, save_config
 from recttrans.controls import ModeBar
 from recttrans.frame import RegionFrame
+from recttrans.history import add_entry, load_history, save_history
+from recttrans.history_window import HistoryWindow
 from recttrans.hotkey import HotkeyManager, normalize_sequence, parse_sequence
 from recttrans.ocr_client import OcrWorker
 from recttrans.popup import ResultPopup
@@ -343,6 +345,7 @@ def run_app(argv: list[str]) -> int:
     auto = AutoTranslator(frame)
     signals = _Signals()
     pool = QThreadPool()
+    history = load_history()
     geometry_timer = QTimer()
     geometry_timer.setSingleShot(True)
     geometry_timer.setInterval(500)
@@ -358,6 +361,7 @@ def run_app(argv: list[str]) -> int:
         "tray_hinted": False,
         "hidden": False,
         "ocr_lang": str((config.get("ocr") or {}).get("language", "auto")),
+        "kind": "ocr",
     }
 
     def get_worker() -> OcrWorker:
@@ -435,6 +439,7 @@ def run_app(argv: list[str]) -> int:
         popup.raise_()
 
     def on_done(result: dict) -> None:
+        nonlocal history
         state["busy"] = False
         auto.set_busy(False)
         if "error" in result:
@@ -447,6 +452,16 @@ def run_app(argv: list[str]) -> int:
             return
         if state["manual"]:
             auto.note_manual_translation()
+            history = add_entry(
+                history,
+                text,
+                result["translation"],
+                state["kind"],
+            )
+            try:
+                save_history(history)
+            except Exception as exc:  # noqa: BLE001
+                _debug(f"save history failed: {exc}")
         if result.get("fallback"):
             _debug(f"translate fallback: {result.get('reason')}")
         status = (
@@ -471,6 +486,7 @@ def run_app(argv: list[str]) -> int:
             return
         state["busy"] = True
         state["manual"] = manual
+        state["kind"] = "ocr"
         auto.set_busy(True)
         _debug(f"start manual={manual}")
         show_result("正在识别与翻译…", force=manual)
@@ -528,6 +544,7 @@ def run_app(argv: list[str]) -> int:
             return
         state["busy"] = True
         state["manual"] = True
+        state["kind"] = "selection"
         auto.set_busy(True)
         _debug("start selection-translate")
         show_result("正在翻译选中文字…", force=True)
@@ -646,6 +663,17 @@ def run_app(argv: list[str]) -> int:
                 )
             apply_mode("auto" if was_auto else "manual")
 
+    def open_history() -> None:
+        nonlocal history
+        dialog = HistoryWindow(history)
+        dialog.exec()
+        if dialog.cleared:
+            history = []
+            try:
+                save_history(history)
+            except Exception as exc:  # noqa: BLE001
+                _debug(f"save history failed: {exc}")
+
     def reset_popup_position() -> None:
         popup.clear_saved_position()
         popup.place_below(frame.geometry().bottomLeft())
@@ -670,6 +698,7 @@ def run_app(argv: list[str]) -> int:
     bar.quit_requested.connect(hide_to_tray)
     tray.toggle_requested.connect(toggle_visibility)
     tray.quick_requested.connect(translate_selection)
+    tray.history_requested.connect(open_history)
     tray.settings_requested.connect(open_settings)
     tray.auto_toggled.connect(lambda on: apply_mode("auto" if on else "manual"))
     tray.quit_requested.connect(lambda: request_quit("tray"))
@@ -817,8 +846,13 @@ def run_app(argv: list[str]) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     global _ACTIVATE_EVENT
-    _ensure_std_streams()
     args = list(sys.argv[1:] if argv is None else argv)
+    if "--ocr-worker" in args:
+        # 打包后 sys.executable 是 exe 本身：用参数回到同一个程序跑 OCR 子进程
+        from recttrans.ocr_worker import main as ocr_worker_main
+
+        return ocr_worker_main()
+    _ensure_std_streams()
     if "--selftest" in args:
         return run_selftest(args)
     if not _acquire_single_instance():

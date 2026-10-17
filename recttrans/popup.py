@@ -18,7 +18,16 @@ from PySide6.QtGui import (
     QPainter,
     QPen,
 )
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QMenu, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QMenu,
+    QSizePolicy,
+    QTextBrowser,
+    QVBoxLayout,
+    QWidget,
+)
 
 from recttrans.terms import build_rich_html
 
@@ -210,10 +219,24 @@ class ResultPopup(QWidget):
         self._status = QLabel("", self)
         self._source = QLabel("", self)
         self._source.setWordWrap(True)
-        self._translation = QLabel("", self)
-        self._translation.setWordWrap(True)
-        self._translation.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
-        self._translation.linkActivated.connect(self._open_link)
+        self._translation = QTextBrowser(self)
+        self._translation.setFrameShape(QFrame.Shape.NoFrame)
+        self._translation.setOpenExternalLinks(False)
+        self._translation.setVerticalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAsNeeded
+        )
+        self._translation.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        self._translation.setStyleSheet(
+            "QTextBrowser { background: transparent; border: none; }"
+        )
+        self._translation.document().setDocumentMargin(0)
+        self._translation.setMinimumHeight(40)
+        self._translation.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
+        )
+        self._translation.anchorClicked.connect(self._open_link)
 
         self._close = _CloseGlyph(self)
         self._close.clicked.connect(self.hide_requested.emit)
@@ -231,7 +254,7 @@ class ResultPopup(QWidget):
         layout.setSpacing(6)
         layout.addLayout(header)
         layout.addWidget(self._source)
-        layout.addWidget(self._translation)
+        layout.addWidget(self._translation, 1)
 
         self._apply_fonts()
         self._apply_theme()
@@ -253,7 +276,10 @@ class ResultPopup(QWidget):
         color = palette["danger"] if self._status.property("is_error") else palette["text"]
         self._status.setStyleSheet(f"color: {color};")
         self._source.setStyleSheet(f"color: {palette['text']};")
-        self._translation.setStyleSheet(f"color: {palette['text']};")
+        self._translation.setStyleSheet(
+            f"QTextBrowser {{ color: {palette['text']}; background: transparent;"
+            " border: none; }}"
+        )
         self._close.set_color(palette["muted"])
         self._handle.set_color(palette["muted"])
         self._render_translation()
@@ -345,40 +371,36 @@ class ResultPopup(QWidget):
         self._resize_to_content()
 
     def translation_text(self) -> str:
-        return self._translation_plain
+        try:
+            return self._translation.toPlainText()
+        except Exception:  # noqa: BLE001
+            return self._translation_plain
 
     # ---------- 术语链接 ----------
 
     def _render_translation(self) -> None:
         palette = self._palette()
         if self._terms:
-            self._translation.setTextFormat(Qt.TextFormat.RichText)
-            self._translation.setText(
+            self._translation.setHtml(
                 build_rich_html(self._translation_plain, self._terms, palette["link"])
             )
-            self._translation.setTextInteractionFlags(
-                Qt.TextInteractionFlag.LinksAccessibleByMouse
-            )
         else:
-            self._translation.setTextFormat(Qt.TextFormat.PlainText)
-            self._translation.setText(self._translation_plain)
-            self._translation.setTextInteractionFlags(
-                Qt.TextInteractionFlag.NoTextInteraction
-            )
+            self._translation.setPlainText(self._translation_plain)
 
     def _open_link(self, url: str) -> None:
-        _open_url(url)
+        _open_url(url.toString() if hasattr(url, "toString") else str(url))
 
     def _resize_to_content(self) -> None:
         if self._user_sized:
             return
         inner_width = self._width - 2 * PADDING
         height = 2 * SHADOW + 2 * PADDING + max(22, self._status.sizeHint().height())
-        for label in (self._source, self._translation):
-            # 注意：父窗口还没 show() 时 isVisible() 恒为 False，
-            # 会把整段文字的高度漏算，浮窗只剩 MIN_HEIGHT（实测 90px）。
-            if not label.isHidden():
-                height += label.heightForWidth(inner_width) + 6
+        # 注意：父窗口还没 show() 时 isVisible() 恒为 False，用 isHidden() 判断。
+        if not self._source.isHidden():
+            height += self._source.heightForWidth(inner_width) + 6
+        document = self._translation.document()
+        document.setTextWidth(inner_width)
+        height += int(document.size().height()) + 8
         width, height = self._clamped_size(self._width + 2 * SHADOW, height)
         self.setFixedSize(width, height)
 

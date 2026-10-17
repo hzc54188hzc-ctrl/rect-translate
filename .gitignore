@@ -11,6 +11,10 @@ tmp_*/
 # 测试临时文件
 tests/_*.json
 
+# 翻译历史（含屏幕文字）
+history.json
+history.json.tmp
+
 # Python 运行环境
 .venv/
 __pycache__/
