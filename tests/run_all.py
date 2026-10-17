@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import os
 import pathlib
 import subprocess
 import sys
@@ -39,7 +40,9 @@ def main() -> int:
             print(f"[MISSING] {path}")
             failed.append(name)
             continue
-        result = subprocess.run([sys.executable, str(path)], cwd=str(root))
+        env = dict(os.environ)
+        env["PYTHONIOENCODING"] = "utf-8"
+        result = subprocess.run([sys.executable, str(path)], cwd=str(root), env=env)
         if result.returncode != 0:
             failed.append(name)
 

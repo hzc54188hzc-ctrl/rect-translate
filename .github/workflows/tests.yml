@@ -18,3 +18,5 @@ jobs:
           python -m pip install -r requirements.txt
       - name: Run regression tests
         run: python tests/run_all.py
+        env:
+          PYTHONIOENCODING: utf-8
