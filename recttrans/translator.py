@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -57,14 +58,55 @@ def translate_rich(text: str, config: dict, timeout: float = 60.0) -> dict:
     """
     provider = str(config.get("translate", {}).get("provider", "deepseek"))
     if provider == "free":
-        return {"text": _translate_free(text, config, timeout), "terms": []}
+        return {"text": _free_resilient(text, config, timeout), "terms": []}
 
-    raw = _translate_llm(text, config, timeout, system=_rich_system_prompt(config))
+    try:
+        raw = _llm_resilient(
+            text, config, timeout, system=_rich_system_prompt(config)
+        )
+    except TranslateError as exc:
+        # 大模型不可用时退回免费通道，至少让用户拿到译文。
+        try:
+            fallback_text = _free_resilient(text, config, timeout)
+        except TranslateError:
+            raise exc
+        return {
+            "text": fallback_text,
+            "terms": [],
+            "fallback": "free",
+            "reason": str(exc),
+        }
     translation, raw_terms = parse_rich_response(raw)
     if not translation.strip():
         raise TranslateError("接口没有返回译文")
     terms = normalize_terms(translation, raw_terms)
     return {"text": translation, "terms": terms}
+
+
+def _is_permanent(error: TranslateError) -> bool:
+    message = str(error)
+    return " 401" in message or " 403" in message
+
+
+def _llm_resilient(
+    text: str, config: dict, timeout: float, system: str
+) -> str:
+    """瞬时错误重试一次；401/403 不重试（重试也不会成功）。"""
+    try:
+        return _translate_llm(text, config, timeout, system=system)
+    except TranslateError as exc:
+        if _is_permanent(exc):
+            raise
+        time.sleep(0.6)
+        return _translate_llm(text, config, timeout, system=system)
+
+
+def _free_resilient(text: str, config: dict, timeout: float) -> str:
+    try:
+        return _translate_free(text, config, timeout)
+    except TranslateError:
+        time.sleep(0.6)
+        return _translate_free(text, config, timeout)
 
 
 def _rich_system_prompt(config: dict) -> str:

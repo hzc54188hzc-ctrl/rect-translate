@@ -81,6 +81,41 @@ class _BitmapInfo(ctypes.Structure):
     _fields_ = [("bmiHeader", _BitmapInfoHeader), ("bmiColors", ctypes.c_uint32 * 3)]
 
 
+class _WindowRect(ctypes.Structure):
+    _fields_ = [
+        ("left", ctypes.c_long),
+        ("top", ctypes.c_long),
+        ("right", ctypes.c_long),
+        ("bottom", ctypes.c_long),
+    ]
+
+
+_user32.GetWindowRect.argtypes = [ctypes.c_void_p, ctypes.POINTER(_WindowRect)]
+_user32.GetWindowRect.restype = ctypes.c_int
+
+
+def window_rect(widget) -> tuple[int, int, int, int]:
+    """返回窗口在屏幕上的物理像素矩形 (x, y, w, h)。
+
+    Qt 的 geometry() 是逻辑像素；在 125%/150% 缩放下直接拿去 BitBlt 会截错区域。
+    进程是 per-monitor DPI aware，GetWindowRect 返回的就是物理像素，
+    多显示器下也不需要自己做 DPR 换算。
+    """
+    rect = _WindowRect()
+    ok = _user32.GetWindowRect(
+        ctypes.c_void_p(int(widget.winId())), ctypes.byref(rect)
+    )
+    if not ok:
+        geometry = widget.geometry()
+        return geometry.x(), geometry.y(), geometry.width(), geometry.height()
+    return (
+        rect.left,
+        rect.top,
+        max(1, rect.right - rect.left),
+        max(1, rect.bottom - rect.top),
+    )
+
+
 def _png_chunk(tag: bytes, data: bytes) -> bytes:
     return (
         struct.pack(">I", len(data))

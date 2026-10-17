@@ -27,6 +27,8 @@ TESTS = [
     "28-activate-event.py",
     "29-first-run.py",
     "30-ocr-auto.py",
+    "31-translate-fallback.py",
+    "32-window-rect.py",
 ]
 
 

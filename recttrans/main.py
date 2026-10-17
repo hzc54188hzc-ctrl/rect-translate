@@ -447,8 +447,15 @@ def run_app(argv: list[str]) -> int:
             return
         if state["manual"]:
             auto.note_manual_translation()
+        if result.get("fallback"):
+            _debug(f"translate fallback: {result.get('reason')}")
+        status = (
+            "大模型暂不可用，已改用免费通道"
+            if result.get("fallback") == "free"
+            else ""
+        )
         show_result(
-            "",
+            status,
             text,
             result["translation"],
             force=state["manual"],
@@ -469,11 +476,9 @@ def run_app(argv: list[str]) -> int:
         show_result("正在识别与翻译…", force=manual)
 
         # OCR 前统一抓 2 倍图：小字号（菜单/代码）识别率明显更好。
-        rect = frame.geometry()
         try:
-            png = capture.grab_region(
-                rect.x(), rect.y(), rect.width(), rect.height(), scale=2
-            )
+            x, y, width, height = capture.window_rect(frame)
+            png = capture.grab_region(x, y, width, height, scale=2)
         except Exception:
             if png is None:
                 raise
@@ -487,6 +492,7 @@ def run_app(argv: list[str]) -> int:
                 "text": text,
                 "translation": result["text"],
                 "terms": result["terms"],
+                "fallback": result.get("fallback"),
             }
 
         pool.start(_Job(work, signals))
@@ -532,6 +538,7 @@ def run_app(argv: list[str]) -> int:
                 "text": text,
                 "translation": result["text"],
                 "terms": result["terms"],
+                "fallback": result.get("fallback"),
             }
 
         pool.start(_Job(work, signals))

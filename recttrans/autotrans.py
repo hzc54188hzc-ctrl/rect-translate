@@ -79,10 +79,8 @@ class AutoTranslator(QObject):
     def note_manual_translation(self) -> None:
         """手动翻过一次后，把当前内容记为「已翻译」，避免紧接着又自动翻一遍。"""
         try:
-            rect = self._frame.geometry()
-            width, height, raw = capture.grab_raw(
-                rect.x(), rect.y(), rect.width(), rect.height()
-            )
+            x, y, width, height = capture.window_rect(self._frame)
+            width, height, raw = capture.grab_raw(x, y, width, height)
             signature = self._signature(width, height, raw)
         except Exception:  # noqa: BLE001
             return
@@ -114,10 +112,8 @@ class AutoTranslator(QObject):
             return
 
         try:
-            rect = self._frame.geometry()
-            width, height, raw = capture.grab_raw(
-                rect.x(), rect.y(), rect.width(), rect.height()
-            )
+            x, y, width, height = capture.window_rect(self._frame)
+            width, height, raw = capture.grab_raw(x, y, width, height)
             signature = self._signature(width, height, raw)
         except Exception:  # noqa: BLE001
             return
