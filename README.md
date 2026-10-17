@@ -32,8 +32,8 @@
 ## 安装与启动
 
 ```powershell
-git clone <this-repository-url>
-cd <repository-folder>
+git clone https://github.com/hzc54188hzc-ctrl/rect-translate.git
+cd rect-translate
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
 .\.venv\Scripts\python.exe 01-run.py
