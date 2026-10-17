@@ -1,0 +1,505 @@
+"""结果浮窗：两套配色（半透明白底黑字 / 半透明黑底白字），可自由拖动与缩放。
+
+配色语言沿用参考应用：纯色卡片 + 12px 圆角 + 不描边靠投影分层，整体 90% 不透明。
+右下角有缩放抓手，拖它改宽高；用户一旦手动改过尺寸，就不再自动贴合内容。
+"""
+
+from __future__ import annotations
+
+import ctypes
+
+from PySide6.QtCore import QPoint, QPointF, QRect, QRectF, Qt, QTimer, QUrl, Signal
+from PySide6.QtGui import (
+    QAction,
+    QColor,
+    QDesktopServices,
+    QFont,
+    QGuiApplication,
+    QPainter,
+    QPen,
+)
+from PySide6.QtWidgets import QHBoxLayout, QLabel, QMenu, QVBoxLayout, QWidget
+
+from recttrans.terms import build_rich_html
+
+RADIUS = 12
+PADDING = 10
+SHADOW = 10
+MIN_WIDTH = 240
+MIN_HEIGHT = 90
+GRIP = 16
+
+# 整体半透明。0.9 是实测取的值：再低会让 9pt 文字掉出 WCAG AA。
+WINDOW_OPACITY = 0.9
+
+THEMES = {
+    "light": {
+        "panel": "#FFFFFF",
+        "text": "#111111",
+        "muted": "#6B7280",
+        "danger": "#B91C1C",
+        "link": "#2563EB",
+    },
+    "dark": {
+        "panel": "#111111",
+        "text": "#FFFFFF",
+        "muted": "#E2E8F0",
+        "danger": "#F87171",
+        "link": "#5D8BE6",
+    },
+}
+
+
+def _open_url(url: str) -> None:
+    """在系统默认浏览器中打开搜索页。"""
+    QDesktopServices.openUrl(QUrl(url))
+
+HWND_TOPMOST = -1
+SWP_NOSIZE = 0x0001
+SWP_NOMOVE = 0x0002
+SWP_NOZORDER = 0x0004
+SWP_NOACTIVATE = 0x0010
+
+_user32 = ctypes.WinDLL("user32", use_last_error=True)
+_user32.SetWindowPos.argtypes = [
+    ctypes.c_ssize_t, ctypes.c_ssize_t, ctypes.c_int, ctypes.c_int,
+    ctypes.c_int, ctypes.c_int, ctypes.c_uint,
+]
+_user32.SetWindowPos.restype = ctypes.c_int
+
+
+def _force_topmost(widget) -> None:
+    """把窗口压到置顶队列最前面（被翻译的窗口也可能置顶）。"""
+    try:
+        _user32.SetWindowPos(
+            int(widget.winId()), HWND_TOPMOST, 0, 0, 0, 0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+        )
+    except Exception:  # noqa: BLE001
+        pass
+
+
+class _CloseGlyph(QWidget):
+    """自绘关闭图标（两条交叉线，线性风格）。"""
+
+    clicked = Signal()
+
+    def __init__(self, parent: QWidget | None = None, color: str = "#6B7280") -> None:
+        super().__init__(parent)
+        self.setFixedSize(22, 22)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setToolTip("关闭")
+        self._color = color
+
+    def set_color(self, color: str) -> None:
+        self._color = color
+        self.update()
+
+    def paintEvent(self, event) -> None:  # noqa: ARG002
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        pen = QPen(QColor(self._color))
+        pen.setWidthF(1.6)
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        painter.setPen(pen)
+        inset = self.width() * 0.34
+        painter.drawLine(QPointF(inset, inset), QPointF(self.width() - inset, self.height() - inset))
+        painter.drawLine(QPointF(self.width() - inset, inset), QPointF(inset, self.height() - inset))
+
+    def mousePressEvent(self, event) -> None:
+        self.clicked.emit()
+        event.accept()
+
+
+class _GripHandle(QWidget):
+    """浮窗顶部的「灵动岛」胶囊：只有拖它才能移动浮窗。"""
+
+    def __init__(self, parent: QWidget) -> None:
+        super().__init__(parent)
+        self.setFixedSize(58, 16)
+        self.setCursor(Qt.CursorShape.SizeAllCursor)
+        self.setToolTip("拖动浮窗")
+        self._color = "#6B7280"
+        self._manual = False
+        self._press_global = QPoint()
+        self._press_pos = QPoint()
+
+    def set_color(self, color: str) -> None:
+        self._color = color
+        self.update()
+
+    def paintEvent(self, event) -> None:  # noqa: ARG002
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setPen(Qt.PenStyle.NoPen)
+        color = QColor(self._color)
+        color.setAlphaF(0.6)
+        painter.setBrush(color)
+        bar = QRectF((self.width() - 48) / 2, (self.height() - 6) / 2, 48, 6)
+        painter.drawRoundedRect(bar, 3, 3)
+
+    def mousePressEvent(self, event) -> None:
+        if event.button() != Qt.MouseButton.LeftButton:
+            return
+        window = self.window()
+        handle = window.windowHandle() if window is not None else None
+        # 原生窗口移动：由系统接管，比逐帧 move() 跟手得多。
+        if handle is not None and handle.startSystemMove():
+            event.accept()
+            return
+        self._manual = True
+        self._press_global = event.globalPosition().toPoint()
+        self._press_pos = window.pos() if window is not None else QPoint()
+        event.accept()
+
+    def mouseMoveEvent(self, event) -> None:
+        if not self._manual or not (event.buttons() & Qt.MouseButton.LeftButton):
+            return
+        window = self.window()
+        if window is None:
+            return
+        delta = event.globalPosition().toPoint() - self._press_global
+        window.move(self._press_pos + delta)
+        event.accept()
+
+    def mouseReleaseEvent(self, event) -> None:
+        if self._manual:
+            self._manual = False
+            window = self.window()
+            if window is not None and hasattr(window, "save_position"):
+                window.save_position()
+                window.position_changed.emit()
+            event.accept()
+
+
+class ResultPopup(QWidget):
+    hide_requested = Signal()
+    position_changed = Signal()
+    reset_requested = Signal()
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(
+            parent,
+            Qt.WindowType.FramelessWindowHint
+            | Qt.WindowType.WindowStaysOnTopHint
+            | Qt.WindowType.Tool,
+        )
+        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setWindowOpacity(WINDOW_OPACITY)
+        self.setMouseTracking(True)
+
+        self._theme = "light"
+        self._resizing = False
+        # 一旦放好就记住位置：移动选框、重新翻译都不再自动挪动浮窗。
+        self._saved_pos: QPoint | None = None
+        self._press_global = QPoint()
+        self._press_pos = QPoint()
+        self._press_size = (0, 0)
+        self._width = 380
+        self._user_sized = False
+        self._terms: list[dict] = []
+        self._translation_plain = ""
+
+        self._handle = _GripHandle(self)
+        self._save_timer = QTimer(self)
+        self._save_timer.setSingleShot(True)
+        self._save_timer.setInterval(400)
+        self._save_timer.timeout.connect(self._persist_position)
+
+        self._status = QLabel("", self)
+        self._source = QLabel("", self)
+        self._source.setWordWrap(True)
+        self._translation = QLabel("", self)
+        self._translation.setWordWrap(True)
+        self._translation.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
+        self._translation.linkActivated.connect(self._open_link)
+
+        self._close = _CloseGlyph(self)
+        self._close.clicked.connect(self.hide_requested.emit)
+
+        header = QHBoxLayout()
+        header.setContentsMargins(0, 0, 0, 0)
+        header.addWidget(self._status)
+        header.addStretch(1)
+        header.addWidget(self._close)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(
+            PADDING + SHADOW, PADDING + SHADOW, PADDING + SHADOW, PADDING + SHADOW
+        )
+        layout.setSpacing(6)
+        layout.addLayout(header)
+        layout.addWidget(self._source)
+        layout.addWidget(self._translation)
+
+        self._apply_fonts()
+        self._apply_theme()
+        self._place_handle()
+
+    # ---------- 主题 ----------
+
+    def set_theme(self, theme: str) -> None:
+        if theme not in THEMES:
+            return
+        self._theme = theme
+        self._apply_theme()
+
+    def _palette(self) -> dict:
+        return THEMES[self._theme]
+
+    def _apply_theme(self) -> None:
+        palette = self._palette()
+        color = palette["danger"] if self._status.property("is_error") else palette["text"]
+        self._status.setStyleSheet(f"color: {color};")
+        self._source.setStyleSheet(f"color: {palette['text']};")
+        self._translation.setStyleSheet(f"color: {palette['text']};")
+        self._close.set_color(palette["muted"])
+        self._handle.set_color(palette["muted"])
+        self._render_translation()
+        self.update()
+
+    # ---------- 字体 ----------
+
+    def _apply_fonts(self) -> None:
+        source_font = QFont()
+        source_font.setPointSizeF(9.0)
+        self._source.setFont(source_font)
+
+        translation_font = QFont()
+        translation_font.setPointSizeF(12.0)
+        translation_font.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 0.4)
+        self._translation.setFont(translation_font)
+
+        status_font = QFont()
+        status_font.setPointSizeF(9.0)
+        self._status.setFont(status_font)
+
+    # ---------- 外观 ----------
+
+    def _panel_rect(self) -> QRectF:
+        return QRectF(self.rect()).adjusted(SHADOW, SHADOW, -SHADOW, -SHADOW + 2)
+
+    def _grip_rect(self) -> QRect:
+        panel = self._panel_rect()
+        return QRect(
+            int(panel.right()) - GRIP - 4, int(panel.bottom()) - GRIP - 4, GRIP, GRIP
+        )
+
+    def paintEvent(self, event) -> None:  # noqa: ARG002
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setPen(Qt.PenStyle.NoPen)
+
+        for step in range(SHADOW, 0, -1):
+            rect = QRectF(self.rect()).adjusted(step, step + 1, -step, -step + 3)
+            alpha = int(6.0 * (1.0 - step / SHADOW) ** 1.6) + 2
+            painter.setBrush(QColor(0, 0, 0, alpha))
+            painter.drawRoundedRect(rect, RADIUS + step * 0.6, RADIUS + step * 0.6)
+
+        painter.setBrush(QColor(self._palette()["panel"]))
+        painter.drawRoundedRect(self._panel_rect(), RADIUS, RADIUS)
+
+        # 右下角缩放抓手：三条斜线
+        pen = QPen(QColor(self._palette()["muted"]))
+        pen.setWidthF(1.2)
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        painter.setPen(pen)
+        grip = self._grip_rect()
+        for offset in (3, 8, 13):
+            painter.drawLine(
+                QPointF(grip.right() - offset, grip.bottom()),
+                QPointF(grip.right(), grip.bottom() - offset),
+            )
+
+    def _available_geometry(self) -> QRect:
+        screen = self.screen() or QGuiApplication.primaryScreen()
+        return screen.availableGeometry()
+
+    def _clamped_size(self, width: int, height: int) -> tuple[int, int]:
+        area = self._available_geometry()
+        max_width = max(MIN_WIDTH, int(area.width() * 0.8))
+        max_height = max(MIN_HEIGHT, int(area.height() * 0.75))
+        return (
+            max(MIN_WIDTH, min(width, max_width)),
+            max(MIN_HEIGHT, min(height, max_height)),
+        )
+
+    # ---------- 内容 ----------
+
+    def set_content(
+        self,
+        source: str,
+        translation: str,
+        status: str = "",
+        is_error: bool = False,
+        terms: list[dict] | None = None,
+    ) -> None:
+        self._status.setText(status)
+        self._status.setProperty("is_error", is_error)
+        self._source.setText(source[:400])
+        self._source.setVisible(bool(source))
+        self._translation_plain = translation
+        self._terms = terms or []
+        self._apply_theme()  # 内含 _render_translation()
+        self._resize_to_content()
+
+    def translation_text(self) -> str:
+        return self._translation_plain
+
+    # ---------- 术语链接 ----------
+
+    def _render_translation(self) -> None:
+        palette = self._palette()
+        if self._terms:
+            self._translation.setTextFormat(Qt.TextFormat.RichText)
+            self._translation.setText(
+                build_rich_html(self._translation_plain, self._terms, palette["link"])
+            )
+            self._translation.setTextInteractionFlags(
+                Qt.TextInteractionFlag.LinksAccessibleByMouse
+            )
+        else:
+            self._translation.setTextFormat(Qt.TextFormat.PlainText)
+            self._translation.setText(self._translation_plain)
+            self._translation.setTextInteractionFlags(
+                Qt.TextInteractionFlag.NoTextInteraction
+            )
+
+    def _open_link(self, url: str) -> None:
+        _open_url(url)
+
+    def _resize_to_content(self) -> None:
+        if self._user_sized:
+            return
+        inner_width = self._width - 2 * PADDING
+        height = 2 * SHADOW + 2 * PADDING + max(22, self._status.sizeHint().height())
+        for label in (self._source, self._translation):
+            # 注意：父窗口还没 show() 时 isVisible() 恒为 False，
+            # 会把整段文字的高度漏算，浮窗只剩 MIN_HEIGHT（实测 90px）。
+            if not label.isHidden():
+                height += label.heightForWidth(inner_width) + 6
+        width, height = self._clamped_size(self._width + 2 * SHADOW, height)
+        self.setFixedSize(width, height)
+
+    def place_below(self, anchor: QPoint) -> None:
+        geometry = self._available_geometry()
+        height = self.height()
+        x = max(geometry.left(), min(anchor.x() - SHADOW, geometry.right() - self.width()))
+        y = anchor.y() - SHADOW
+        if y + height > geometry.bottom():
+            y = max(geometry.top(), anchor.y() - height + SHADOW)
+        self.move(x, y)
+
+    # ---------- 位置记忆 ----------
+
+    def has_saved_position(self) -> bool:
+        return self._saved_pos is not None
+
+    def set_saved_position(self, pos: QPoint) -> None:
+        self._saved_pos = QPoint(pos)
+
+    def clear_saved_position(self) -> None:
+        self._saved_pos = None
+
+    def save_position(self) -> None:
+        self._saved_pos = self.pos()
+
+    def place_saved(self) -> None:
+        """回到记住的位置；屏幕变小或坐标失效时夹回可见范围。"""
+        if self._saved_pos is None:
+            return
+        geometry = self._available_geometry()
+        x = max(
+            geometry.left(),
+            min(self._saved_pos.x(), geometry.right() - self.width() + 1),
+        )
+        y = max(
+            geometry.top(),
+            min(self._saved_pos.y(), geometry.bottom() - self.height() + 1),
+        )
+        self.move(x, y)
+
+    def place_near(self, anchor: QPoint) -> None:
+        """首次出现：贴在 anchor 下方；已有位置则原地不动。"""
+        if self._saved_pos is not None:
+            self.place_saved()
+        else:
+            self.place_below(anchor)
+
+    # ---------- 顶部拖动胶囊 ----------
+
+    def _place_handle(self) -> None:
+        self._handle.move((self.width() - self._handle.width()) // 2, SHADOW - 6)
+        self._handle.raise_()
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        if hasattr(self, "_handle"):
+            self._place_handle()
+
+    def moveEvent(self, event) -> None:
+        super().moveEvent(event)
+        # 原生拖动结束后不会额外发信号：用防抖把最终位置写回配置。
+        if hasattr(self, "_save_timer") and self.isVisible():
+            self._save_timer.start()
+
+    def _persist_position(self) -> None:
+        self.save_position()
+        self.position_changed.emit()
+
+    # ---------- 拖动与缩放 ----------
+
+    def mousePressEvent(self, event) -> None:
+        if event.button() != Qt.MouseButton.LeftButton:
+            return
+        point = event.position().toPoint()
+        self._press_global = event.globalPosition().toPoint()
+        if self._grip_rect().contains(point):
+            self._resizing = True
+            self._press_size = (self.width(), self.height())
+            event.accept()
+
+    def mouseMoveEvent(self, event) -> None:
+        if not self._resizing:
+            return
+        delta = event.globalPosition().toPoint() - self._press_global
+        width, height = self._clamped_size(
+            self._press_size[0] + delta.x(), self._press_size[1] + delta.y()
+        )
+        self._user_sized = True
+        self.setFixedSize(width, height)
+        event.accept()
+
+    def mouseReleaseEvent(self, event) -> None:  # noqa: ARG002
+        if self._resizing:
+            self._resizing = False
+            self.save_position()
+            self.position_changed.emit()
+
+    def contextMenuEvent(self, event) -> None:
+        menu = QMenu(self)
+        copy_action = QAction("复制译文", menu)
+        theme_action = QAction("切换深浅配色", menu)
+        reset_action = QAction("回到选框下方", menu)
+        autosize_action = QAction("恢复自动大小", menu)
+        close_action = QAction("关闭", menu)
+        menu.addAction(copy_action)
+        menu.addAction(theme_action)
+        menu.addAction(reset_action)
+        menu.addAction(autosize_action)
+        menu.addSeparator()
+        menu.addAction(close_action)
+        chosen = menu.exec(event.globalPos())
+        if chosen is copy_action:
+            QGuiApplication.clipboard().setText(self.translation_text())
+        elif chosen is theme_action:
+            self.set_theme("dark" if self._theme == "light" else "light")
+        elif chosen is reset_action:
+            self.clear_saved_position()
+            self.reset_requested.emit()
+        elif chosen is autosize_action:
+            self._user_sized = False
+            self._resize_to_content()
+        elif chosen is close_action:
+            self.hide_requested.emit()

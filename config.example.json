@@ -1,0 +1,26 @@
+{
+  "ocr": {
+    "engine": "windows",
+    "language": "auto"
+  },
+  "translate": {
+    "provider": "free",
+    "base_url": "https://api.deepseek.com",
+    "model": "deepseek-chat",
+    "api_key": ""
+  },
+  "source_language": "auto",
+  "target_language": "zh-CN",
+  "quick_hotkey": "Ctrl+Shift+Q",
+  "popup": {
+    "x": 760,
+    "y": 600,
+    "placed": false
+  },
+  "hint_shown": false,
+  "frame": {
+    "color": "#FFA800",
+    "thickness": 6,
+    "length": 48
+  }
+}
