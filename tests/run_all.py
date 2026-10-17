@@ -31,6 +31,7 @@ TESTS = [
     "32-window-rect.py",
     "33-history.py",
     "34-popup-scroll.py",
+    "35-frozen-paths.py",
 ]
 
 

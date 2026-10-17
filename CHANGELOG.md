@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.0.5 — 2026-10-17
+
+- 修复打包版路径：配置、历史与日志写在 exe 同级目录，而不是 PyInstaller 的 `_internal`。
+- 免安装版随 Release 自动构建并上传。
+
 ## v1.0.4 — 2026-10-17
 
 - 提供 Windows x64 免安装版（PyInstaller，onedir），作为 Release 附件。

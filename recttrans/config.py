@@ -4,9 +4,18 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from pathlib import Path
 
-APP_DIR = Path(__file__).resolve().parent.parent
+
+def _app_dir() -> Path:
+    """打包后配置要落在 exe 旁边，而不是 PyInstaller 的 _internal 里。"""
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    return Path(__file__).resolve().parent.parent
+
+
+APP_DIR = _app_dir()
 CONFIG_PATH = APP_DIR / "config.local.json"
 
 DEFAULTS: dict = {

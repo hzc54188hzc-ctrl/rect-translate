@@ -40,7 +40,14 @@ DEFAULT_GEOMETRY = QRect(770, 465, 420, 110)
 # 配置里的组合被占用时按顺序尝试；托盘与设置窗口显示的都是真正生效的那个。
 QUICK_HOTKEY_FALLBACKS = ("Ctrl+Alt+G", "Ctrl+Shift+Q", "Ctrl+Alt+F9")
 
-APP_DIR = pathlib.Path(__file__).resolve().parent.parent
+def _app_dir() -> pathlib.Path:
+    """打包后日志与配置放在 exe 旁边，而不是 _internal。"""
+    if getattr(sys, "frozen", False):
+        return pathlib.Path(sys.executable).resolve().parent
+    return pathlib.Path(__file__).resolve().parent.parent
+
+
+APP_DIR = _app_dir()
 ERROR_LOG = APP_DIR / "error.log"
 DEBUG_LOG = APP_DIR / "debug.log"
 _DEBUG = bool(os.environ.get("RECTTRANS_DEBUG"))

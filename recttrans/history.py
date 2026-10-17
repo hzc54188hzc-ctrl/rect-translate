@@ -7,10 +7,18 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import time
 from pathlib import Path
 
-APP_DIR = Path(__file__).resolve().parent.parent
+
+def _app_dir() -> Path:
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    return Path(__file__).resolve().parent.parent
+
+
+APP_DIR = _app_dir()
 HISTORY_PATH = APP_DIR / "history.json"
 MAX_ENTRIES = 50
 
