@@ -4,7 +4,7 @@
 
 界面为中文。
 
-![矩形翻译：框住网页区域，右侧浮窗给出译文，专业术语以蓝字标出](docs/screenshot-01.png)
+![矩形翻译：框住 arXiv 论文《Attention Is All You Need》，右侧浮窗给出译文，Transformer、注意力机制、BLEU 等术语以蓝字标出](docs/screenshot-01.png)
 
 *框住网页任意区域即可持续翻译；译文中的高辨识度术语会以蓝字标出，点击可跳转搜索。*
 
