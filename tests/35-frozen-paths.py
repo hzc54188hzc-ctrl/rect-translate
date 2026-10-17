@@ -38,7 +38,7 @@ def main() -> int:
 
     check(
         "非打包模式回到源码目录",
-        config._app_dir().name == "01-矩形翻译",
+        config._app_dir() == pathlib.Path(config.__file__).resolve().parent.parent,
         str(config._app_dir()),
     )
 
