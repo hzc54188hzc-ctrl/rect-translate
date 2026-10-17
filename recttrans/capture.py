@@ -15,6 +15,7 @@ import zlib
 WDA_EXCLUDEFROMCAPTURE = 0x00000011
 SRCCOPY = 0x00CC0020
 DIB_RGB_COLORS = 0
+HALFTONE = 4
 
 _PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 
@@ -39,6 +40,18 @@ _gdi32.BitBlt.argtypes = [
     ctypes.c_void_p, ctypes.c_int, ctypes.c_int, ctypes.c_uint,
 ]
 _gdi32.BitBlt.restype = ctypes.c_int
+_gdi32.SetStretchBltMode.argtypes = [ctypes.c_void_p, ctypes.c_int]
+_gdi32.SetStretchBltMode.restype = ctypes.c_int
+_gdi32.SetBrushOrgEx.argtypes = [
+    ctypes.c_void_p, ctypes.c_int, ctypes.c_int, ctypes.c_void_p,
+]
+_gdi32.SetBrushOrgEx.restype = ctypes.c_int
+_gdi32.StretchBlt.argtypes = [
+    ctypes.c_void_p, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int,
+    ctypes.c_void_p, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int,
+    ctypes.c_uint,
+]
+_gdi32.StretchBlt.restype = ctypes.c_int
 _gdi32.GetDIBits.argtypes = [
     ctypes.c_void_p, ctypes.c_void_p, ctypes.c_uint, ctypes.c_uint,
     ctypes.c_void_p, ctypes.c_void_p, ctypes.c_uint,
@@ -108,14 +121,19 @@ def exclude_from_capture(widget) -> bool:
         return False
 
 
-def grab_raw(x: int, y: int, width: int, height: int) -> tuple[int, int, bytes]:
+def grab_raw(
+    x: int, y: int, width: int, height: int, scale: int = 1
+) -> tuple[int, int, bytes]:
     """抓取屏幕区域，返回 (宽, 高, BGRA 原始像素)。
 
     变化检测只关心像素，不需要编码 PNG，所以单独留了这个出口。
+    scale > 1 时用 GDI StretchBlt 直接放大（HALFTONE），供小字号 OCR 使用。
     """
     width, height = int(width), int(height)
+    scale = max(1, int(scale))
     if width <= 0 or height <= 0:
         raise ValueError(f"区域尺寸非法：{width}x{height}")
+    out_width, out_height = width * scale, height * scale
 
     screen_dc = _user32.GetDC(None)
     if not screen_dc:
@@ -125,24 +143,50 @@ def grab_raw(x: int, y: int, width: int, height: int) -> tuple[int, int, bytes]:
     bitmap = None
     try:
         memory_dc = _gdi32.CreateCompatibleDC(screen_dc)
-        bitmap = _gdi32.CreateCompatibleBitmap(screen_dc, width, height)
+        bitmap = _gdi32.CreateCompatibleBitmap(screen_dc, out_width, out_height)
         if not memory_dc or not bitmap:
             raise RuntimeError(f"创建兼容位图失败（Win32 错误 {ctypes.get_last_error()}）")
 
         _gdi32.SelectObject(memory_dc, bitmap)
-        if not _gdi32.BitBlt(memory_dc, 0, 0, width, height, screen_dc, int(x), int(y), SRCCOPY):
-            raise RuntimeError(f"BitBlt 失败（Win32 错误 {ctypes.get_last_error()}）")
+        if scale == 1:
+            ok = _gdi32.BitBlt(
+                memory_dc, 0, 0, width, height, screen_dc, int(x), int(y), SRCCOPY
+            )
+        else:
+            _gdi32.SetStretchBltMode(memory_dc, HALFTONE)
+            _gdi32.SetBrushOrgEx(memory_dc, 0, 0, None)
+            ok = _gdi32.StretchBlt(
+                memory_dc,
+                0,
+                0,
+                out_width,
+                out_height,
+                screen_dc,
+                int(x),
+                int(y),
+                width,
+                height,
+                SRCCOPY,
+            )
+        if not ok:
+            raise RuntimeError(f"抓图失败（Win32 错误 {ctypes.get_last_error()}）")
 
-        buffer = ctypes.create_string_buffer(width * height * 4)
+        buffer = ctypes.create_string_buffer(out_width * out_height * 4)
         info = _BitmapInfo()
         info.bmiHeader.biSize = ctypes.sizeof(_BitmapInfoHeader)
-        info.bmiHeader.biWidth = width
-        info.bmiHeader.biHeight = -height  # 负数 = 自顶向下，省去翻行
+        info.bmiHeader.biWidth = out_width
+        info.bmiHeader.biHeight = -out_height  # 负数 = 自顶向下，省去翻行
         info.bmiHeader.biPlanes = 1
         info.bmiHeader.biBitCount = 32
         info.bmiHeader.biCompression = 0  # BI_RGB
         if not _gdi32.GetDIBits(
-            memory_dc, bitmap, 0, height, buffer, ctypes.byref(info), DIB_RGB_COLORS
+            memory_dc,
+            bitmap,
+            0,
+            out_height,
+            buffer,
+            ctypes.byref(info),
+            DIB_RGB_COLORS,
         ):
             raise RuntimeError(f"GetDIBits 失败（Win32 错误 {ctypes.get_last_error()}）")
 
@@ -154,10 +198,10 @@ def grab_raw(x: int, y: int, width: int, height: int) -> tuple[int, int, bytes]:
             _gdi32.DeleteDC(ctypes.c_void_p(memory_dc))
         _user32.ReleaseDC(None, ctypes.c_void_p(screen_dc))
 
-    return width, height, pixels
+    return out_width, out_height, pixels
 
 
-def grab_region(x: int, y: int, width: int, height: int) -> bytes:
+def grab_region(x: int, y: int, width: int, height: int, scale: int = 1) -> bytes:
     """抓取屏幕上一块矩形区域，返回 PNG 字节。"""
-    pixel_width, pixel_height, pixels = grab_raw(x, y, width, height)
+    pixel_width, pixel_height, pixels = grab_raw(x, y, width, height, scale)
     return encode_png(pixel_width, pixel_height, pixels)

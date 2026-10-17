@@ -75,6 +75,7 @@ class RegionFrame(QWidget):
     quit_requested = Signal()
     geometry_changed = Signal(QRect)
     auto_toggled = Signal(bool)
+    ocr_language_changed = Signal(str)
 
     def __init__(self, geometry: QRect, capture_excluded: bool = True) -> None:
         super().__init__(
@@ -91,6 +92,7 @@ class RegionFrame(QWidget):
         self._capture_excluded = capture_excluded
         self._auto_on = True
         self._mode = "move"
+        self._ocr_language = "auto"
         self._accent = ACCENT_COLOR
         self._thick = THICK
         self._arm_base = CORNER_ARM
@@ -223,6 +225,9 @@ class RegionFrame(QWidget):
     def set_auto_checked(self, checked: bool) -> None:
         self._auto_on = checked
 
+    def set_ocr_language(self, value: str) -> None:
+        self._ocr_language = value if value in ("auto", "zh", "en") else "auto"
+
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
         self._apply_mask()
@@ -342,9 +347,22 @@ class RegionFrame(QWidget):
         auto_action = QAction("自动翻译（内容变化时）", menu)
         auto_action.setCheckable(True)
         auto_action.setChecked(self._auto_on)
+        ocr_menu = QMenu("OCR 语言", menu)
+        ocr_actions: dict[str, QAction] = {}
+        for value, label in (
+            ("auto", "自动（中英择优）"),
+            ("zh", "中文"),
+            ("en", "英文"),
+        ):
+            action = QAction(label, ocr_menu)
+            action.setCheckable(True)
+            action.setChecked(value == self._ocr_language)
+            ocr_menu.addAction(action)
+            ocr_actions[value] = action
         quit_action = QAction("隐藏到托盘", menu)
         menu.addAction(translate_action)
         menu.addAction(auto_action)
+        menu.addMenu(ocr_menu)
         menu.addSeparator()
         menu.addAction(quit_action)
         chosen = menu.exec(event.globalPos())
@@ -353,6 +371,10 @@ class RegionFrame(QWidget):
         elif chosen is auto_action:
             self._auto_on = auto_action.isChecked()
             self.auto_toggled.emit(self._auto_on)
+        elif chosen in ocr_actions.values():
+            value = next(v for v, action in ocr_actions.items() if action is chosen)
+            self.set_ocr_language(value)
+            self.ocr_language_changed.emit(value)
         elif chosen is quit_action:
             self.quit_requested.emit()
 

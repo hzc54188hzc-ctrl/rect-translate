@@ -329,6 +329,7 @@ def run_app(argv: list[str]) -> int:
         _parse_rect(argv, config), capture_excluded="--allow-capture" not in argv
     )
     frame.apply_style(*_frame_style(config))
+    frame.set_ocr_language(str((config.get("ocr") or {}).get("language", "auto")))
     popup = ResultPopup()
     popup_cfg = config.get("popup") or {}
     # `pinned` 是 2026-10-17f 的旧字段，迁移为「已记住位置」。
@@ -356,6 +357,7 @@ def run_app(argv: list[str]) -> int:
         "hotkey_label": "",
         "tray_hinted": False,
         "hidden": False,
+        "ocr_lang": str((config.get("ocr") or {}).get("language", "auto")),
     }
 
     def get_worker() -> OcrWorker:
@@ -393,6 +395,18 @@ def run_app(argv: list[str]) -> int:
             config["hint_shown"] = True
         except Exception as exc:  # noqa: BLE001
             _debug(f"save hint flag failed: {exc}")
+
+    def save_ocr_language(value: str) -> None:
+        try:
+            fresh = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+        except Exception:  # noqa: BLE001
+            fresh = json.loads(json.dumps(config))
+        fresh.setdefault("ocr", {})["language"] = value
+        try:
+            save_config(fresh)
+            config.setdefault("ocr", {})["language"] = value
+        except Exception as exc:  # noqa: BLE001
+            _debug(f"save ocr language failed: {exc}")
 
     def show_result(
         status: str,
@@ -454,12 +468,18 @@ def run_app(argv: list[str]) -> int:
         _debug(f"start manual={manual}")
         show_result("正在识别与翻译…", force=manual)
 
-        if png is None:
-            rect = frame.geometry()
-            png = capture.grab_region(rect.x(), rect.y(), rect.width(), rect.height())
+        # OCR 前统一抓 2 倍图：小字号（菜单/代码）识别率明显更好。
+        rect = frame.geometry()
+        try:
+            png = capture.grab_region(
+                rect.x(), rect.y(), rect.width(), rect.height(), scale=2
+            )
+        except Exception:
+            if png is None:
+                raise
 
         def work() -> dict:
-            text = get_worker().recognize(png)
+            text = get_worker().recognize(png, lang=state["ocr_lang"])
             if not text.strip():
                 return {"text": "", "translation": "", "terms": []}
             result = translate_rich(text, config)
@@ -626,6 +646,10 @@ def run_app(argv: list[str]) -> int:
         save_popup_state()
         popup.show()
 
+    def on_ocr_language_changed(value: str) -> None:
+        state["ocr_lang"] = value if value in ("auto", "zh", "en") else "auto"
+        save_ocr_language(state["ocr_lang"])
+
     frame.translate_requested.connect(start_translation)
     auto.triggered.connect(lambda payload: start_translation(payload, False))
     frame.quit_requested.connect(hide_to_tray)
@@ -643,6 +667,7 @@ def run_app(argv: list[str]) -> int:
     tray.auto_toggled.connect(lambda on: apply_mode("auto" if on else "manual"))
     tray.quit_requested.connect(lambda: request_quit("tray"))
     frame.auto_toggled.connect(lambda enabled: apply_mode("auto" if enabled else "manual"))
+    frame.ocr_language_changed.connect(on_ocr_language_changed)
     frame.geometry_changed.connect(bar.place_for)
     frame.geometry_changed.connect(lambda _rect: geometry_timer.start())
     _APP.installNativeEventFilter(hotkeys)

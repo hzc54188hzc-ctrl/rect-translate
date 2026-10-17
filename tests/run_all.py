@@ -25,6 +25,7 @@ TESTS = [
     "27-frame-geometry.py",
     "28-activate-event.py",
     "29-first-run.py",
+    "30-ocr-auto.py",
 ]
 
 
