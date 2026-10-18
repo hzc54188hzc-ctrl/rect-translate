@@ -31,7 +31,7 @@ def main() -> int:
         # 1) 第一次失败、第二次成功：重试一次，不走回退
         calls = {"n": 0}
 
-        def flaky(text, config, timeout, system=None):
+        def flaky(text, config, timeout, system=None, **kwargs):
             calls["n"] += 1
             if calls["n"] == 1:
                 raise translator.TranslateError("接口返回 500：boom")
@@ -47,7 +47,7 @@ def main() -> int:
         # 2) 持续失败：回退免费通道
         calls["n"] = 0
 
-        def broken(text, config, timeout, system=None):
+        def broken(text, config, timeout, system=None, **kwargs):
             calls["n"] += 1
             raise translator.TranslateError("接口返回 500：down")
 
@@ -60,7 +60,7 @@ def main() -> int:
         # 3) 401 不重试，直接回退
         calls["n"] = 0
 
-        def unauthorized(text, config, timeout, system=None):
+        def unauthorized(text, config, timeout, system=None, **kwargs):
             calls["n"] += 1
             raise translator.TranslateError("接口返回 401：bad key")
 

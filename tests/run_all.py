@@ -32,6 +32,11 @@ TESTS = [
     "33-history.py",
     "34-popup-scroll.py",
     "35-frozen-paths.py",
+    "39-rolling-buffer.py",
+    "40-caption-assembly.py",
+    "45-popup-caption.py",
+    "50-caption-settings.py",
+    "51-caption-scroll.py",
 ]
 
 

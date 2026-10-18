@@ -85,7 +85,11 @@ powershell -NoProfile -File tools\05-install-shortcut.ps1
 
 ## 切换到大模型
 
-设置 → 翻译通道 →「大模型」，填入以 `sk-` 开头的 DeepSeek API key。key 只保存在本机 `config.local.json`，不会上传。没有 key 时请保持「免费接口」。
+设置 → 翻译通道 →「大模型」，填写接口地址、API key 和模型名。
+
+接口地址支持任何 OpenAI 兼容服务（OpenAI、Moonshot、通义千问兼容模式、智谱、硅基流动、Ollama、LM Studio 等）。默认是 `https://api.deepseek.com` 和 `deepseek-chat`；换服务时改这三项即可。
+
+DeepSeek 的 key 以 `sk-` 开头，其他服务按各自要求填写。key 只保存在本机 `config.local.json`，不会上传。没有 key 时请保持「免费接口」。
 
 ## 隐私
 

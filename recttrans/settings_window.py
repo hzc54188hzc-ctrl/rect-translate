@@ -465,7 +465,15 @@ class SettingsWindow(QDialog):
             button.toggled.connect(lambda checked: checked and self._on_style_changed())
         self._sync_style_buttons()
 
-        layout.addWidget(self._section("大模型（DeepSeek）"))
+        layout.addWidget(self._section("大模型（OpenAI 兼容）"))
+        layout.addWidget(self._hint("接口地址"))
+        self._base_url = QLineEdit(
+            str(config["translate"].get("base_url", "https://api.deepseek.com"))
+        )
+        self._base_url.setPlaceholderText("https://api.deepseek.com")
+        layout.addWidget(self._base_url)
+
+        layout.addWidget(self._hint("API key"))
         self._key = QLineEdit(str(config["translate"].get("api_key", "")))
         self._key.setEchoMode(QLineEdit.EchoMode.Password)
         self._key.setPlaceholderText("sk-...")
@@ -478,6 +486,7 @@ class SettingsWindow(QDialog):
         layout.addWidget(self._key_error)
         self._key.textChanged.connect(lambda: self._key_error.hide())
 
+        layout.addWidget(self._hint("模型名"))
         self._model = QLineEdit(str(config["translate"].get("model", "deepseek-chat")))
         self._model.setPlaceholderText("deepseek-chat")
         layout.addWidget(self._model)
@@ -540,6 +549,7 @@ class SettingsWindow(QDialog):
         self._free_button.setChecked(provider == "free")
         self._llm_button.setChecked(provider == "deepseek")
         is_llm = provider == "deepseek"
+        self._base_url.setEnabled(is_llm)
         self._key.setEnabled(is_llm)
         self._model.setEnabled(is_llm)
 
@@ -604,9 +614,17 @@ class SettingsWindow(QDialog):
             return
 
         key = self._key.text().strip()
-        if self._provider == "deepseek" and not key.startswith("sk-"):
+        base_url = (
+            self._base_url.text().strip().rstrip("/")
+            or "https://api.deepseek.com"
+        )
+        if (
+            self._provider == "deepseek"
+            and "deepseek.com" in base_url
+            and not key.startswith("sk-")
+        ):
             self._key_error.setText(
-                "大模型通道需要以 sk- 开头的 API key；没有 key 请切到「免费接口」。"
+                "DeepSeek 需要以 sk- 开头的 API key；其他兼容接口按服务要求填写。"
             )
             self._key_error.show()
             self._key.setFocus()
@@ -614,6 +632,7 @@ class SettingsWindow(QDialog):
 
         config = json.loads(json.dumps(self._config))
         config["translate"]["provider"] = self._provider
+        config["translate"]["base_url"] = base_url
         config["translate"]["api_key"] = key
         model = self._model.text().strip()
         config["translate"]["model"] = model or "deepseek-chat"
