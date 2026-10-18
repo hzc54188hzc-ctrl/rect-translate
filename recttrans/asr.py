@@ -4,8 +4,17 @@ from __future__ import annotations
 
 import pathlib
 import os
+import sys
 
-APP_DIR = pathlib.Path(__file__).resolve().parent.parent
+
+def _app_dir() -> pathlib.Path:
+    """打包后模型要放在 exe 旁边，和配置、日志保持同一层。"""
+    if getattr(sys, "frozen", False):
+        return pathlib.Path(sys.executable).resolve().parent
+    return pathlib.Path(__file__).resolve().parent.parent
+
+
+APP_DIR = _app_dir()
 MODEL_DIR = APP_DIR / "models" / "faster-whisper-tiny.en"
 
 
