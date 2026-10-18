@@ -470,6 +470,7 @@ def run_app(argv: list[str]) -> int:
         "caption_dropped": 0,
         "caption_errors": 0,
         "download_progress": None,
+        "download_timer": None,
     }
 
     def get_worker() -> OcrWorker:
@@ -1130,7 +1131,11 @@ def run_app(argv: list[str]) -> int:
 
     def on_model_downloaded(result: dict) -> None:
         progress = state.get("download_progress")
+        timer = state.get("download_timer")
         state["download_progress"] = None
+        state["download_timer"] = None
+        if timer is not None:
+            timer.stop()
         if progress is not None:
             progress.close()
         if result.get("ok"):
@@ -1159,13 +1164,35 @@ def run_app(argv: list[str]) -> int:
                     tray.set_subtitle_checked(False)
                     return
                 progress = QProgressDialog(
-                    "正在下载语音模型…", None, 0, 0, None
+                    "正在下载语音模型… 0%", None, 0, 100, None
                 )
                 progress.setWindowTitle("下载模型")
                 progress.setWindowModality(Qt.WindowModality.ApplicationModal)
                 progress.setCancelButton(None)
                 progress.show()
                 state["download_progress"] = progress
+                download_timer = QTimer()
+                download_timer.setInterval(500)
+
+                def update_download_progress() -> None:
+                    target = (
+                        APP_DIR
+                        / "models"
+                        / "faster-whisper-tiny.en"
+                        / "model.bin"
+                    )
+                    if target.exists():
+                        percent = min(
+                            99, int(target.stat().st_size / 75537502 * 100)
+                        )
+                        progress.setValue(percent)
+                        progress.setLabelText(
+                            f"正在下载语音模型… {percent}%"
+                        )
+
+                download_timer.timeout.connect(update_download_progress)
+                download_timer.start()
+                state["download_timer"] = download_timer
 
                 def work() -> dict:
                     script = APP_DIR / "tools" / "download-model.ps1"
