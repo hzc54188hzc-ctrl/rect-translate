@@ -37,6 +37,7 @@ TESTS = [
     "45-popup-caption.py",
     "50-caption-settings.py",
     "51-caption-scroll.py",
+    "52-popup-resize-scroll.py",
 ]
 
 

@@ -182,6 +182,35 @@ class _GripHandle(QWidget):
             event.accept()
 
 
+class _ResizeHandle(QWidget):
+    """右下角缩放手柄：独立子控件，避免被文字区域吞掉鼠标事件。"""
+
+    def __init__(self, parent: QWidget) -> None:
+        super().__init__(parent)
+        self.setFixedSize(20, 20)
+        self.setCursor(Qt.CursorShape.SizeFDiagCursor)
+        self.setToolTip("拖动缩放")
+        self._press_global = QPoint()
+        self._press_size = (0, 0)
+
+    def mousePressEvent(self, event) -> None:
+        if event.button() != Qt.MouseButton.LeftButton:
+            return
+        self._press_global = event.globalPosition().toPoint()
+        self._press_size = (self.parent().width(), self.parent().height())
+        event.accept()
+
+    def mouseMoveEvent(self, event) -> None:
+        delta = event.globalPosition().toPoint() - self._press_global
+        width, height = self.parent()._clamped_size(
+            self._press_size[0] + delta.x(),
+            self._press_size[1] + delta.y(),
+        )
+        self.parent()._user_sized = True
+        self.parent().setFixedSize(width, height)
+        event.accept()
+
+
 class ResultPopup(QWidget):
     hide_requested = Signal()
     position_changed = Signal()
@@ -217,6 +246,7 @@ class ResultPopup(QWidget):
         self._translation_plain = ""
 
         self._handle = _GripHandle(self)
+        self._resize_handle = _ResizeHandle(self)
         self._save_timer = QTimer(self)
         self._save_timer.setSingleShot(True)
         self._save_timer.setInterval(400)
@@ -238,7 +268,7 @@ class ResultPopup(QWidget):
             "QTextBrowser { background: transparent; border: none; }"
         )
         self._translation.document().setDocumentMargin(0)
-        self._translation.setMinimumHeight(40)
+        self._translation.setMinimumHeight(20)
         self._translation.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
         )
@@ -691,6 +721,12 @@ class ResultPopup(QWidget):
     def _place_handle(self) -> None:
         self._handle.move((self.width() - self._handle.width()) // 2, SHADOW - 6)
         self._handle.raise_()
+        grip = self._grip_rect()
+        self._resize_handle.move(
+            grip.center().x() - self._resize_handle.width() // 2,
+            grip.center().y() - self._resize_handle.height() // 2,
+        )
+        self._resize_handle.raise_()
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
@@ -708,6 +744,15 @@ class ResultPopup(QWidget):
         self.position_changed.emit()
 
     # ---------- 拖动与缩放 ----------
+
+    def wheelEvent(self, event) -> None:
+        bar = self._translation.verticalScrollBar()
+        if bar.maximum() > 0:
+            step = int(event.angleDelta().y() / 2)
+            bar.setValue(bar.value() - step)
+            event.accept()
+            return
+        super().wheelEvent(event)
 
     def mousePressEvent(self, event) -> None:
         if event.button() != Qt.MouseButton.LeftButton:
