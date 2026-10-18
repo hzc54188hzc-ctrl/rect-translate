@@ -1220,7 +1220,8 @@ def run_app(argv: list[str]) -> int:
                     )
                     output = (completed.stdout or "") + (completed.stderr or "")
                     return {
-                        "ok": completed.returncode == 0 and model_available(),
+                        # PowerShell 在全部 skip 时也可能返回非 0；以文件是否齐全为准。
+                        "ok": model_available(),
                         "output": output,
                     }
 
