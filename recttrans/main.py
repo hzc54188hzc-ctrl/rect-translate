@@ -1201,10 +1201,16 @@ def run_app(argv: list[str]) -> int:
                 tray.notify("语音模型加载失败", str(exc), 6000)
                 return
             try:
+                def on_window(window, start) -> None:
+                    _trace_caption(
+                        "audio_window",
+                        start=round(start, 1),
+                        samples=len(window),
+                    )
+                    bridge.segment.emit((window, start))
+
                 loopback = RollingCapture(
-                    on_window=lambda window, start: bridge.segment.emit(
-                        (window, start)
-                    ),
+                    on_window=on_window,
                     on_error=bridge.failed.emit,
                 )
                 loopback.start()
