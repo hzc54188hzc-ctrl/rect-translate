@@ -18,7 +18,16 @@ import subprocess
 
 import numpy as np
 
-from PySide6.QtCore import QObject, QPoint, QRect, QRunnable, QThreadPool, QTimer, Signal
+from PySide6.QtCore import (
+    QObject,
+    QPoint,
+    QRect,
+    QRunnable,
+    QThreadPool,
+    QTimer,
+    Qt,
+    Signal,
+)
 from PySide6.QtGui import QCursor, QGuiApplication
 from PySide6.QtWidgets import QApplication, QMessageBox, QProgressDialog
 
