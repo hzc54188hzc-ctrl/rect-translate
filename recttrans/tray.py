@@ -30,6 +30,7 @@ class Tray(QSystemTrayIcon):
     toggle_requested = Signal()
     quick_requested = Signal()
     history_requested = Signal()
+    subtitle_toggled = Signal(bool)
     settings_requested = Signal()
     auto_toggled = Signal(bool)
     quit_requested = Signal()
@@ -44,6 +45,8 @@ class Tray(QSystemTrayIcon):
         self._auto = menu.addAction("自动翻译")
         self._auto.setCheckable(True)
         self._auto.setChecked(True)
+        self._subtitle = menu.addAction("系统声音字幕")
+        self._subtitle.setCheckable(True)
         self._history = menu.addAction("历史记录…")
         self._settings = menu.addAction("设置…")
         menu.addSeparator()
@@ -54,6 +57,9 @@ class Tray(QSystemTrayIcon):
         self._toggle.triggered.connect(self.toggle_requested.emit)
         self._quick.triggered.connect(self.quick_requested.emit)
         self._auto.triggered.connect(lambda checked: self.auto_toggled.emit(checked))
+        self._subtitle.triggered.connect(
+            lambda checked: self.subtitle_toggled.emit(checked)
+        )
         self._history.triggered.connect(self.history_requested.emit)
         self._settings.triggered.connect(self.settings_requested.emit)
         self._quit.triggered.connect(self.quit_requested.emit)
@@ -61,6 +67,9 @@ class Tray(QSystemTrayIcon):
 
     def set_auto_checked(self, checked: bool) -> None:
         self._auto.setChecked(checked)
+
+    def set_subtitle_checked(self, checked: bool) -> None:
+        self._subtitle.setChecked(checked)
 
     def set_hotkeys(self, quick: str) -> None:
         self._quick.setText(f"划词翻译 ({quick})")

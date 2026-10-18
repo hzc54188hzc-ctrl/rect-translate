@@ -22,5 +22,9 @@
     "color": "#FFA800",
     "thickness": 6,
     "length": 48
+  },
+  "caption": {
+    "context_lines": 2,
+    "display_lines": 3
   }
 }

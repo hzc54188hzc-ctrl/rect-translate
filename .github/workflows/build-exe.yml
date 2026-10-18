@@ -24,7 +24,12 @@ jobs:
       - name: Build with PyInstaller
         run: |
           python -m PyInstaller --noconfirm --clean --windowed --onedir `
-            --name RectTranslate --icon app.ico --collect-all winrt 01-run.py
+            --name RectTranslate --icon app.ico `
+            --collect-all winrt --collect-all faster_whisper `
+            --collect-all ctranslate2 --collect-all soundcard 01-run.py
+      - name: Include model downloader
+        shell: pwsh
+        run: Copy-Item -Recurse tools dist\RectTranslate\tools
       - name: Smoke test (startup)
         shell: pwsh
         run: |

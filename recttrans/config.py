@@ -33,6 +33,7 @@ DEFAULTS: dict = {
     "popup": {"x": 760, "y": 600, "placed": False},
     "hint_shown": False,
     "frame": {"color": "#FFA800", "thickness": 6, "length": 48},
+    "caption": {"context_lines": 2, "display_lines": 3},
 }
 
 

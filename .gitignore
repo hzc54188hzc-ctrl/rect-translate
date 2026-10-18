@@ -10,6 +10,11 @@ tmp_*/
 
 # 测试临时文件
 tests/_*.json
+tests/_*.log
+caption-trace.log
+
+# 本地语音识别模型（体积大，按需下载）
+models/
 
 # 翻译历史（含屏幕文字）
 history.json

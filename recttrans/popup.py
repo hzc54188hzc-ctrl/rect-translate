@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import ctypes
+import html
 
 from PySide6.QtCore import QPoint, QPointF, QRect, QRectF, Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import (
@@ -207,6 +208,11 @@ class ResultPopup(QWidget):
         self._press_size = (0, 0)
         self._width = 380
         self._user_sized = False
+        self._caption_mode = False
+        self._caption_html = ""
+        self._caption_display_lines = 3
+        self._user_scrolled = False
+        self._rebuilding = False
         self._terms: list[dict] = []
         self._translation_plain = ""
 
@@ -237,6 +243,13 @@ class ResultPopup(QWidget):
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
         )
         self._translation.anchorClicked.connect(self._open_link)
+        self._scroll_timer = QTimer(self)
+        self._scroll_timer.setSingleShot(True)
+        self._scroll_timer.setInterval(3000)
+        self._scroll_timer.timeout.connect(self._caption_scroll_home)
+        self._translation.verticalScrollBar().valueChanged.connect(
+            self._on_caption_scroll
+        )
 
         self._close = _CloseGlyph(self)
         self._close.clicked.connect(self.hide_requested.emit)
@@ -275,7 +288,8 @@ class ResultPopup(QWidget):
         palette = self._palette()
         color = palette["danger"] if self._status.property("is_error") else palette["text"]
         self._status.setStyleSheet(f"color: {color};")
-        self._source.setStyleSheet(f"color: {palette['text']};")
+        source_color = palette["muted"] if self._caption_mode else palette["text"]
+        self._source.setStyleSheet(f"color: {source_color};")
         self._translation.setStyleSheet(
             f"QTextBrowser {{ color: {palette['text']}; background: transparent;"
             " border: none; }}"
@@ -288,6 +302,23 @@ class ResultPopup(QWidget):
     # ---------- 字体 ----------
 
     def _apply_fonts(self) -> None:
+        if self._caption_mode:
+            source_font = QFont()
+            source_font.setPointSizeF(11.0)
+            self._source.setFont(source_font)
+
+            translation_font = QFont()
+            translation_font.setPointSizeF(17.0)
+            translation_font.setLetterSpacing(
+                QFont.SpacingType.AbsoluteSpacing, 0.3
+            )
+            self._translation.setFont(translation_font)
+
+            status_font = QFont()
+            status_font.setPointSizeF(9.0)
+            self._status.setFont(status_font)
+            return
+
         source_font = QFont()
         source_font.setPointSizeF(9.0)
         self._source.setFont(source_font)
@@ -361,6 +392,8 @@ class ResultPopup(QWidget):
         is_error: bool = False,
         terms: list[dict] | None = None,
     ) -> None:
+        self._caption_mode = False
+        self._apply_fonts()
         self._status.setText(status)
         self._status.setProperty("is_error", is_error)
         self._source.setText(source[:400])
@@ -369,6 +402,149 @@ class ResultPopup(QWidget):
         self._terms = terms or []
         self._apply_theme()  # 内含 _render_translation()
         self._resize_to_content()
+
+    # ---------- 同声传译字幕 ----------
+
+    def set_caption(
+        self,
+        current: str,
+        previous: str = "",
+        status: str = "同声传译 · 本地识别",
+    ) -> None:
+        if not (current or "").strip() and (previous or "").strip():
+            # 刚切完句、下一批词还没到：把上一句顶到当前行，避免字幕整块消失。
+            current, previous = previous, ""
+        self._caption_mode = True
+        self._apply_fonts()
+        self._status.setText(status)
+        self._status.setProperty("is_error", False)
+        self._source.setText((previous or "")[:200])
+        self._source.setVisible(bool(previous))
+        self._translation_plain = (current or "").strip()
+        self._terms = []
+        self._apply_theme()
+        self._resize_to_content()
+        self._keep_on_screen()
+
+    def set_caption_status(self, text: str) -> None:
+        self._caption_mode = True
+        self._apply_fonts()
+        self._status.setText(text)
+        self._resize_to_content()
+
+    def set_caption_bilingual(
+        self,
+        chinese: str,
+        english: str,
+        status: str = "同声传译 · 本地识别 + 翻译",
+    ) -> None:
+        """中文译文大字，英文原文小字；还没译出来时先大字显示英文。"""
+        zh = (chinese or "").strip()
+        en = (english or "").strip()
+        main_text, sub_text = (zh, en) if zh else (en, "")
+        self._caption_mode = True
+        self._apply_fonts()
+        self._status.setText(status)
+        self._status.setProperty("is_error", False)
+        self._source.setText(sub_text[:400])
+        self._source.setVisible(bool(sub_text))
+        self._translation_plain = main_text
+        self._terms = []
+        self._apply_theme()
+        self._resize_to_content()
+        self._keep_on_screen()
+
+    def set_caption_zh(
+        self,
+        chinese: str,
+        previous: str = "",
+        status: str = "同声传译 · 中文",
+    ) -> None:
+        """只显示中文：当前句大字，上一句小字；英文不占浮窗。"""
+        self.set_caption_zh_lines([chinese, previous], status=status)
+
+    def set_caption_zh_lines(
+        self,
+        lines: list[str],
+        display_lines: int = 3,
+        status: str = "同声传译 · 中文",
+    ) -> None:
+        """所有行放进可滚动区域：第一行大字，历史小字；滚轮可向上回看。"""
+        cleaned = [str(item).strip() for item in lines if str(item).strip()]
+        if not cleaned:
+            return
+        self._caption_mode = True
+        self._caption_display_lines = max(2, min(4, display_lines))
+        palette = self._palette()
+        parts = []
+        ordered = list(reversed(cleaned))  # 旧行在上，最新一行在最底部
+        for index, line in enumerate(ordered):
+            is_current = index == len(ordered) - 1
+            size = 17 if is_current else 11
+            color = palette["text"] if is_current else palette["muted"]
+            parts.append(
+                f'<div style="font-size:{size}pt; color:{color};'
+                f' margin-bottom:4px;">{html.escape(line)}</div>'
+            )
+        self._caption_html = "".join(parts)
+        self._translation_plain = cleaned[0]
+        self._source.hide()
+        self._apply_fonts()
+        self._status.setText(status)
+        self._status.setProperty("is_error", False)
+        self._terms = []
+        self._apply_theme()
+        self._resize_caption_height()
+        if not self._user_scrolled:
+            bar = self._translation.verticalScrollBar()
+            bar.setValue(bar.maximum())
+        self._keep_on_screen()
+
+    def clear_caption(self) -> None:
+        self._caption_mode = True
+        self._source.setText("")
+        self._source.setVisible(False)
+        self._translation_plain = ""
+        self._render_translation()
+        self._resize_to_content()
+
+    def show_caption(self, anchor: QRect | None = None) -> None:
+        """第一次显示字幕：没有记住位置就贴在锚点（功能浮窗）下方。"""
+        if not self._user_sized and self._width < 420:
+            self._width = 420
+        self._caption_mode = True
+        self._apply_fonts()
+        self._resize_to_content()
+        if self._saved_pos is not None:
+            self.place_saved()
+        elif anchor is not None:
+            self.place_below_rect(anchor)
+        else:
+            area = self._available_geometry()
+            x = area.center().x() - self.width() // 2
+            y = area.bottom() - self.height() - 56
+            self.move(
+                max(area.left(), x),
+                max(area.top(), y),
+            )
+        self.show()
+        self.raise_()
+
+    def caption_text(self) -> str:
+        return self._translation.toPlainText()
+
+    def caption_previous(self) -> str:
+        return self._source.text()
+
+    def status_text(self) -> str:
+        return self._status.text()
+
+    def _keep_on_screen(self) -> None:
+        area = self._available_geometry()
+        x = max(area.left(), min(self.x(), area.right() - self.width() + 1))
+        y = max(area.top(), min(self.y(), area.bottom() - self.height() + 1))
+        if (x, y) != (self.x(), self.y()):
+            self.move(x, y)
 
     def translation_text(self) -> str:
         try:
@@ -379,6 +555,18 @@ class ResultPopup(QWidget):
     # ---------- 术语链接 ----------
 
     def _render_translation(self) -> None:
+        if self._caption_mode and self._caption_html:
+            bar = self._translation.verticalScrollBar()
+            keep = bar.value()
+            was_scrolled = self._user_scrolled
+            self._rebuilding = True
+            self._translation.setHtml(self._caption_html)
+            self._rebuilding = False
+            if was_scrolled:
+                bar.setValue(min(keep, bar.maximum()))
+            else:
+                bar.setValue(bar.maximum())
+            return
         palette = self._palette()
         if self._terms:
             self._translation.setHtml(
@@ -393,6 +581,9 @@ class ResultPopup(QWidget):
     def _resize_to_content(self) -> None:
         if self._user_sized:
             return
+        if self._caption_mode:
+            self._resize_caption_height()
+            return
         inner_width = self._width - 2 * PADDING
         height = 2 * SHADOW + 2 * PADDING + max(22, self._status.sizeHint().height())
         # 注意：父窗口还没 show() 时 isVisible() 恒为 False，用 isHidden() 判断。
@@ -401,8 +592,43 @@ class ResultPopup(QWidget):
         document = self._translation.document()
         document.setTextWidth(inner_width)
         height += int(document.size().height()) + 8
+        if self._caption_mode:
+            # 字幕窗口保持稳定高度，短句时也不缩成一条，减少上下跳动。
+            height = max(height, 120)
         width, height = self._clamped_size(self._width + 2 * SHADOW, height)
         self.setFixedSize(width, height)
+
+    def _resize_caption_height(self) -> None:
+        width = self._width + 2 * SHADOW
+        width, _height = self._clamped_size(width, 120)
+        main_height = 36
+        sub_height = 20
+        height = (
+            2 * SHADOW
+            + 2 * PADDING
+            + 22
+            + main_height
+            + (self._caption_display_lines - 1) * sub_height
+            + 10
+        )
+        self.setFixedSize(width, height)
+
+    def _on_caption_scroll(self, value: int) -> None:
+        if not self._caption_mode or self._rebuilding:
+            return
+        bar = self._translation.verticalScrollBar()
+        if value < bar.maximum() - 4:
+            self._user_scrolled = True
+            self._scroll_timer.start()
+        else:
+            self._user_scrolled = False
+
+    def _caption_scroll_home(self) -> None:
+        if not self._caption_mode:
+            return
+        self._user_scrolled = False
+        bar = self._translation.verticalScrollBar()
+        bar.setValue(bar.maximum())
 
     def place_below(self, anchor: QPoint) -> None:
         geometry = self._available_geometry()
@@ -411,6 +637,17 @@ class ResultPopup(QWidget):
         y = anchor.y() - SHADOW
         if y + height > geometry.bottom():
             y = max(geometry.top(), anchor.y() - height + SHADOW)
+        self.move(x, y)
+
+    def place_below_rect(self, anchor: QRect, gap: int = 8) -> None:
+        """贴在矩形下方，并与矩形右边缘对齐。"""
+        area = self._available_geometry()
+        x = anchor.right() - self.width() + 1
+        y = anchor.bottom() + gap
+        if y + self.height() > area.bottom():
+            y = anchor.top() - self.height() - gap
+        x = max(area.left(), min(x, area.right() - self.width() + 1))
+        y = max(area.top(), min(y, area.bottom() - self.height() + 1))
         self.move(x, y)
 
     # ---------- 位置记忆 ----------

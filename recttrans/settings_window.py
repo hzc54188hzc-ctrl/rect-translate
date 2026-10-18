@@ -205,9 +205,18 @@ class SettingsWindow(QDialog):
             self._frame_style["thickness"] = 6
         if self._frame_style["length"] not in [v for _n, v in FRAME_LENGTHS]:
             self._frame_style["length"] = 48
+        caption_section = config.get("caption") or {}
+        self._caption_context = int(caption_section.get("context_lines", 2))
+        self._caption_lines = int(caption_section.get("display_lines", 3))
+        if self._caption_context not in (1, 2, 3):
+            self._caption_context = 2
+        if self._caption_lines not in (2, 3, 4):
+            self._caption_lines = 3
         self._color_buttons: dict[str, QPushButton] = {}
         self._thick_buttons: dict[int, QPushButton] = {}
         self._length_buttons: dict[int, QPushButton] = {}
+        self._context_buttons: dict[int, QPushButton] = {}
+        self._lines_buttons: dict[int, QPushButton] = {}
 
         self.setStyleSheet(
             f"""
@@ -342,6 +351,55 @@ class SettingsWindow(QDialog):
         language_row.addLayout(target_box, 1)
         layout.addLayout(language_row)
 
+        layout.addWidget(self._section("同声传译"))
+        caption_row = QHBoxLayout()
+        caption_row.setSpacing(16)
+
+        context_box = QVBoxLayout()
+        context_box.setSpacing(4)
+        context_box.addWidget(self._hint("上下文句数"))
+        context_buttons = QHBoxLayout()
+        context_buttons.setSpacing(4)
+        for value, name in ((1, "1 句"), (2, "2 句"), (3, "3 句")):
+            button = QPushButton(name)
+            button.setObjectName("mini")
+            button.setCheckable(True)
+            button.setCursor(Qt.CursorShape.PointingHandCursor)
+            button.clicked.connect(
+                lambda _checked=False, v=value: self._set_caption_context(v)
+            )
+            context_buttons.addWidget(button)
+            self._context_buttons[value] = button
+        context_box.addLayout(context_buttons)
+
+        lines_box = QVBoxLayout()
+        lines_box.setSpacing(4)
+        lines_box.addWidget(self._hint("显示行数"))
+        lines_buttons = QHBoxLayout()
+        lines_buttons.setSpacing(4)
+        for value in (2, 3, 4):
+            button = QPushButton(f"{value} 行")
+            button.setObjectName("mini")
+            button.setCheckable(True)
+            button.setCursor(Qt.CursorShape.PointingHandCursor)
+            button.clicked.connect(
+                lambda _checked=False, v=value: self._set_caption_lines(v)
+            )
+            lines_buttons.addWidget(button)
+            self._lines_buttons[value] = button
+        lines_box.addLayout(lines_buttons)
+
+        caption_row.addLayout(context_box, 1)
+        caption_row.addLayout(lines_box, 1)
+        layout.addLayout(caption_row)
+        caption_hint = QLabel(
+            "上下文越多，代词和称呼越准；显示行数决定浮窗高度。"
+            "语速快时建议 2 句上下文 + 3 行。"
+        )
+        caption_hint.setObjectName("hint")
+        caption_hint.setWordWrap(True)
+        layout.addWidget(caption_hint)
+
         layout.addWidget(self._section("选框外观"))
         style_row = QHBoxLayout()
         style_row.setSpacing(6)
@@ -475,6 +533,7 @@ class SettingsWindow(QDialog):
         self._source.setCurrentIndex(index if index >= 0 else 0)
         index = self._target.findData(target)
         self._target.setCurrentIndex(index if index >= 0 else 0)
+        self._sync_caption_buttons()
 
     def _set_provider(self, provider: str) -> None:
         self._provider = provider
@@ -483,6 +542,20 @@ class SettingsWindow(QDialog):
         is_llm = provider == "deepseek"
         self._key.setEnabled(is_llm)
         self._model.setEnabled(is_llm)
+
+    def _set_caption_context(self, value: int) -> None:
+        self._caption_context = value if value in (1, 2, 3) else 2
+        for option, button in self._context_buttons.items():
+            button.setChecked(option == self._caption_context)
+
+    def _set_caption_lines(self, value: int) -> None:
+        self._caption_lines = value if value in (2, 3, 4) else 3
+        for option, button in self._lines_buttons.items():
+            button.setChecked(option == self._caption_lines)
+
+    def _sync_caption_buttons(self) -> None:
+        self._set_caption_context(self._caption_context)
+        self._set_caption_lines(self._caption_lines)
 
     # ---------- 选框外观 ----------
 
@@ -548,6 +621,10 @@ class SettingsWindow(QDialog):
         config["target_language"] = self._target.currentData()
         config["quick_hotkey"] = hotkey
         config["frame"] = dict(self._frame_style)
+        config["caption"] = {
+            "context_lines": self._caption_context,
+            "display_lines": self._caption_lines,
+        }
         save_config(config)
         self.saved_config = config
         self.accept()

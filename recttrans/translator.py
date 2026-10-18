@@ -17,6 +17,21 @@ SYSTEM_PROMPT = (
     "保持原有的段落结构，不要合并或拆分段落。"
 )
 
+CAPTION_SYSTEM_PROMPT = (
+    "你在为美剧或直播做同声传译字幕。用户可能给出【上文】和【本句】。"
+    "上文只用于理解代词、语气、称呼和对话关系，不要翻译它；"
+    "只输出【本句】的自然、口语化简体中文译文。"
+    "如果本句里的 she/he/it/they 等代词能从上一句确定具体指谁，"
+    "译文里直接写出所指（例如“我妈”“那小子”），不要只写“她/他”。"
+    "要求：像真人在说话，不要书面腔；不要逐词直译；短句优先；"
+    "避免翻译腔，不要写“我将”“我会”“这是……的”这类句式；"
+    "可以用成语、俗语和口头禅，但只在贴合原意时用，不要为了用而用；"
+    "语气词按人物情绪来，不要每句都加“好吧”“行吧”“天哪”；"
+    "保留人名、地名、专有名词的常用译名；只输出译文，不要解释、不要加引号。"
+    "示例：【上文】Mom is going to kill me when she finds out."
+    "【本句】I can't face her. → 我没脸见我妈。"
+)
+
 _LANGUAGE_NAMES = {
     "zh-CN": "简体中文",
     "zh-Hans-CN": "简体中文",
@@ -48,6 +63,28 @@ def translate(text: str, config: dict, timeout: float = 60.0) -> str:
     if provider == "free":
         return _translate_free(text, config, timeout)
     return _translate_llm(text, config, timeout)
+
+
+def translate_caption(
+    text: str,
+    config: dict,
+    timeout: float = 8.0,
+    context: str = "",
+) -> str:
+    """影视/直播字幕：在普通翻译基础上要求口语化。"""
+    provider = str(config.get("translate", {}).get("provider", "deepseek"))
+    if provider == "free":
+        return _free_resilient(text, config, timeout)
+    payload = text
+    if context.strip():
+        payload = f"【上文】{context.strip()[:500]}\n【本句】{text.strip()}"
+    return _llm_resilient(
+        payload,
+        config,
+        timeout,
+        system=CAPTION_SYSTEM_PROMPT,
+        temperature=0.5,
+    )
 
 
 def translate_rich(text: str, config: dict, timeout: float = 60.0) -> dict:
@@ -89,16 +126,24 @@ def _is_permanent(error: TranslateError) -> bool:
 
 
 def _llm_resilient(
-    text: str, config: dict, timeout: float, system: str
+    text: str,
+    config: dict,
+    timeout: float,
+    system: str,
+    temperature: float = 0.2,
 ) -> str:
     """瞬时错误重试一次；401/403 不重试（重试也不会成功）。"""
     try:
-        return _translate_llm(text, config, timeout, system=system)
+        return _translate_llm(
+            text, config, timeout, system=system, temperature=temperature
+        )
     except TranslateError as exc:
         if _is_permanent(exc):
             raise
         time.sleep(0.6)
-        return _translate_llm(text, config, timeout, system=system)
+        return _translate_llm(
+            text, config, timeout, system=system, temperature=temperature
+        )
 
 
 def _free_resilient(text: str, config: dict, timeout: float) -> str:
@@ -182,7 +227,11 @@ def _translate_free(text: str, config: dict, timeout: float) -> str:
 
 
 def _translate_llm(
-    text: str, config: dict, timeout: float, system: str | None = None
+    text: str,
+    config: dict,
+    timeout: float,
+    system: str | None = None,
+    temperature: float = 0.2,
 ) -> str:
     settings = config["translate"]
     base_url = str(settings["base_url"]).rstrip("/")
@@ -193,7 +242,7 @@ def _translate_llm(
             {"role": "system", "content": system or _system_prompt(config)},
             {"role": "user", "content": text},
         ],
-        "temperature": 0.2,
+        "temperature": temperature,
         "stream": False,
     }
     request = urllib.request.Request(
