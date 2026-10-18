@@ -100,6 +100,24 @@ def _trace_caption(event: str, **fields) -> None:
         pass
 
 
+def run_audio_probe() -> int:
+    """打包版诊断：录 2 秒环回音频，把设备名和 RMS 写到 exe 旁边。"""
+    import numpy as np
+    import soundcard as sc
+
+    try:
+        speaker = sc.default_speaker()
+        mic = sc.get_microphone(id=speaker.id, include_loopback=True)
+        with mic.recorder(samplerate=48000, channels=2) as recorder:
+            data = recorder.record(numframes=48000 * 2)
+        rms = float(np.sqrt(np.mean(np.square(data))))
+        message = f"speaker={speaker.name}\nmic={mic.name}\nrms={rms}\n"
+    except Exception as exc:  # noqa: BLE001
+        message = f"error={type(exc).__name__}: {exc}\n"
+    (APP_DIR / "audio-probe.log").write_text(message, encoding="utf-8")
+    return 0
+
+
 def _log_line(message: str) -> None:
     """不受 RECTTRANS_DEBUG 控制的关键事件日志（热键、版本、重复启动）。"""
     try:
@@ -1525,6 +1543,8 @@ def main(argv: list[str] | None = None) -> int:
         from recttrans.ocr_worker import main as ocr_worker_main
 
         return ocr_worker_main()
+    if "--audio-probe" in args:
+        return run_audio_probe()
     _ensure_std_streams()
     if "--selftest" in args:
         return run_selftest(args)
